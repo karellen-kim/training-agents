@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학습 노트 — Prompt Chaining · Tool Choice · XML</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+</head>
+<body>
+
+<button class="menu-btn" id="menuBtn" aria-label="목차 열기" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+<div class="toc-backdrop" id="tocBackdrop"></div>
+<aside class="toc-panel" id="tocPanel" aria-hidden="true">
+  <div class="label">목차</div>
+  <ol>
+    <li><a href="#s1">Prompt Chaining</a></li>
+    <li><a href="#s2">Tool Choice</a></li>
+    <li><a href="#s3">XML 태그</a></li>
+  </ol>
+</aside>
+
+<section class="hero">
+  <div class="meta-row">
+    <span>training-agents · docs</span>
+    <span>2026 · 학습 노트</span>
+  </div>
+  <h1 class="hero-title">
+    <em>한 화면</em>으로 보는<br>
+    에이전트 프롬프트 기초.
+  </h1>
+  <p class="hero-sub">
+    Prompt Chaining, Tool Choice, XML 태그 — 손으로 짜보며 정리한 핵심.
+    개념·관행·함정만 추려서 1분 안에 다시 떠올릴 수 있도록 한다.
+  </p>
+  <div class="hero-grid">
+    <div><span class="k">Pattern</span><span class="v">Prompt Chaining</span></div>
+    <div><span class="k">Mechanic</span><span class="v">Tool Choice</span></div>
+    <div><span class="k">Prompting</span><span class="v">XML Tags</span></div>
+    <div><span class="k">Source</span><span class="v">src/*.py</span></div>
+  </div>
+</section>
+
+<section class="section" id="s1">
+  <div class="section-head">
+    <div class="section-num">01</div>
+    <div class="section-titles">
+      <div class="section-kicker">Workflow · Sequential</div>
+      <h2 class="section-title">Prompt Chaining</h2>
+    </div>
+  </div>
+
+  <p class="lead">
+    한 작업을 여러 단계로 쪼개 <em>직렬</em>로 LLM을 호출한다.
+    각 단계는 이전 단계 출력을 입력으로 받고, 호출 자체는 <em>독립</em>이다.
+    단계 사이의 <span class="hl">검증 게이트</span>로 망가진 출력을 조기에 끊는다.
+  </p>
+
+  <div class="code-card">
+    <div class="code-head">
+      <h4>chain() 사용 예</h4>
+      <span class="tag">python</span>
+    </div>
+    <pre><code class="language-python">chain("친환경 패션", prompts=[
+    "3문장 개요를 만든다.",
+    "톤(미니멀, 진정성)에 맞게 다듬어라.",
+    "200자 본문으로 확장하라.",
+])</code></pre>
+  </div>
+
+  <ul>
+    <li><strong>검증 게이트</strong> — <code>if "&lt;error&gt;" in out</code>로 중단. system 프롬프트에 "문제 있으면 <code>&lt;error&gt;</code>로 답하라" 지시가 있어야 트리거.</li>
+    <li><strong>독립 호출</strong> — 이전 turn이 messages로 누적되지 않음. 의도된 stateless.</li>
+    <li><strong>쓸 때</strong> — 단계가 명확히 분리되고 중간 산출물 검증이 중요할 때. 단계가 서로 영향을 줘야 하면 multi-turn으로.</li>
+  </ul>
+
+  <div class="margin-note">
+    체이닝의 핵심은 단계 분리가 아니라 <strong>각 단계 출력을 다음 단계의 입력 스키마에 맞게 좁히는 것</strong>이다. 단계 사이 형식이 흔들리면 게이트가 무의미해진다.
+  </div>
+</section>
+
+<section class="section" id="s2">
+  <div class="section-head">
+    <div class="section-num">02</div>
+    <div class="section-titles">
+      <div class="section-kicker">Mechanic · Tool Use</div>
+      <h2 class="section-title">Tool Choice — 모델이 도구를 고른다</h2>
+    </div>
+  </div>
+
+  <p class="lead">
+    <code>tools</code>는 <em>메뉴</em>일 뿐, 실행은 <em>모델 판단</em>이다.
+    매 turn마다 도구를 부를지(<code>tool_use</code>) 텍스트로 답할지(<code>end_turn</code>)를 모델이 결정하고,
+    어떤 도구를 부를지는 <code>description</code>이 좌우한다.
+  </p>
+
+  <div class="decision cols-3">
+    <div class="row">
+      <div class="cell head">tool_choice</div>
+      <div class="cell head">동작</div>
+      <div class="cell head">전형적 용도</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>{"type": "auto"}</code> <strong>(기본)</strong></div>
+      <div class="cell">모델이 알아서 결정</div>
+      <div class="cell">일반 에이전트</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>{"type": "any"}</code></div>
+      <div class="cell">도구 중 <strong>하나는 반드시</strong> 호출</div>
+      <div class="cell">"반드시 도구로 답"</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>{"type": "tool", "name": "X"}</code></div>
+      <div class="cell">특정 도구 <strong>강제</strong> 호출</div>
+      <div class="cell">형식 강제, 평가 단계</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>{"type": "none"}</code></div>
+      <div class="cell">도구 호출 <strong>금지</strong></div>
+      <div class="cell">요약·평가 단계</div>
+    </div>
+  </div>
+
+  <ul>
+    <li><strong>병렬 차단</strong> — <code>{"type": "auto", "disable_parallel_tool_use": true}</code>로 한 응답에 도구 1개만, 순차 추론을 강제.</li>
+    <li><strong>도구 선택 정확도의 절반은 description</strong> — 입력의 형식·단위·범위와 사용 시점, 다른 도구와의 경계를 1~2줄로 명확히.</li>
+  </ul>
+</section>
+
+<section class="section" id="s3">
+  <div class="section-head">
+    <div class="section-num">03</div>
+    <div class="section-titles">
+      <div class="section-kicker">Prompting · Structure</div>
+      <h2 class="section-title">XML 태그로 입력 감싸기</h2>
+    </div>
+  </div>
+
+  <p class="lead">
+    Claude에서 가장 일반적인 입력 구조화 방식. 지시/데이터 경계를 명확히 하고,
+    <em>prompt injection 1차 방어</em>가 된다. <strong>예약 태그는 없고 이름은 자유</strong> — 의미에 맞게만 쓰면 된다.
+  </p>
+
+  <div class="code-card">
+    <div class="code-head">
+      <h4>입력 감싸기 패턴</h4>
+      <span class="tag">python</span>
+    </div>
+    <pre><code class="language-python">llm_call(f"{p}\n\n&lt;input&gt;\n{out}\n&lt;/input&gt;")</code></pre>
+  </div>
+
+  <div class="decision cols-2">
+    <div class="row">
+      <div class="cell head">관습 태그</div>
+      <div class="cell head">용도</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;input&gt;</code></div>
+      <div class="cell">일반 입력</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;document&gt;</code> / <code>&lt;documents&gt;&lt;doc&gt;…&lt;/doc&gt;&lt;/documents&gt;</code></div>
+      <div class="cell">긴 문서, 다중 문서</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;context&gt;</code></div>
+      <div class="cell">배경 정보</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;example&gt;</code></div>
+      <div class="cell">few-shot 예시</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;rubric&gt;</code> / <code>&lt;criteria&gt;</code></div>
+      <div class="cell">평가 기준</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;answer&gt;</code></div>
+      <div class="cell">최종 답 위치 (모델이 자동으로 감싸기도 함)</div>
+    </div>
+  </div>
+
+  <ul>
+    <li><strong>주의 — <code>&lt;thinking&gt;</code></strong>: 시키지 않아도 Claude가 사고 과정을 이 태그에 자발적으로 넣는 경향. 다른 용도로 쓰지 말 것.</li>
+    <li><strong>일관성</strong> — 한 프롬프트 안에서 같은 의미는 같은 태그.</li>
+    <li><strong>대안</strong> — 코드면 트리플 백틱, 구조화 데이터면 JSON. 마크다운 <code>###</code>은 경계가 약해 비권장.</li>
+    <li><strong>특수 기능과 혼동 금지</strong> — extended thinking, prompt caching은 API 파라미터지 XML 태그가 아님.</li>
+  </ul>
+
+  <div class="margin-note">
+    사용자 입력을 감쌀 땐 입력 안에 같은 태그가 들어있을 가능성을 고려한다. 필요하면 <code>&lt;user_input id="abc123"&gt;…&lt;/user_input&gt;</code>처럼 구분자를 더해 경계를 강화.
+  </div>
+</section>
+
+<footer>
+  <div class="lockup">training-agents / docs</div>
+  <div>
+    소스: <code>src/prompt_chain.py</code>, <code>src/augmented_llm.py</code> &nbsp;·&nbsp;
+    참고: <a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic — Building Effective Agents</a>
+  </div>
+</footer>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    hljs.highlightAll();
+
+    const btn = document.getElementById("menuBtn");
+    const panel = document.getElementById("tocPanel");
+    const backdrop = document.getElementById("tocBackdrop");
+    const setOpen = (open) => {
+      btn.classList.toggle("open", open);
+      panel.classList.toggle("open", open);
+      backdrop.classList.toggle("open", open);
+      btn.setAttribute("aria-expanded", String(open));
+      panel.setAttribute("aria-hidden", String(!open));
+    };
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(!panel.classList.contains("open"));
+    });
+    backdrop.addEventListener("click", () => setOpen(false));
+    panel.addEventListener("click", (e) => {
+      if (e.target.tagName === "A") setOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && panel.classList.contains("open")) setOpen(false);
+    });
+  });
+</script>
+</body>
+</html>
