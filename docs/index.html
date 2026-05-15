@@ -132,6 +132,41 @@
     <li><strong>병렬 차단</strong> — <code>{"type": "auto", "disable_parallel_tool_use": true}</code>로 한 응답에 도구 1개만, 순차 추론을 강제.</li>
     <li><strong>도구 선택 정확도의 절반은 description</strong> — 입력의 형식·단위·범위와 사용 시점, 다른 도구와의 경계를 1~2줄로 명확히.</li>
   </ul>
+
+  <div class="subhead">stop_reason 4종</div>
+  <p>tool-use 루프의 흐름을 결정하는 신호. <code>end_turn</code>이 나오면 루프 종료, <code>tool_use</code>면 실행 후 다음 turn.</p>
+
+  <div class="decision cols-3">
+    <div class="row">
+      <div class="cell head">값</div>
+      <div class="cell head">의미</div>
+      <div class="cell head">agent 루프에서</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>end_turn</code></div>
+      <div class="cell">모델이 자연스럽게 답을 마침</div>
+      <div class="cell"><strong>루프 종료, 결과 반환</strong></div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>tool_use</code></div>
+      <div class="cell">도구 호출 요청</div>
+      <div class="cell">실행 후 결과 회신하고 다음 turn</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>max_tokens</code></div>
+      <div class="cell">토큰 한도에서 잘림</div>
+      <div class="cell">응답 도중 끊김 — 한도 늘리거나 continue</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>stop_sequence</code></div>
+      <div class="cell">지정 stop 문자열에서 멈춤</div>
+      <div class="cell">보통 종료 처리</div>
+    </div>
+  </div>
+
+  <div class="margin-note">
+    <strong>end_turn이 안 나올 때</strong> — 모델이 도구만 계속 부르고 텍스트 마무리를 안 하면 <code>max_steps</code>에 도달해 에러. 방어책: system 프롬프트에 "필요한 정보를 모았으면 도구를 멈추고 정리해 답하라" 명시, 또는 명시적 종료 도구(<code>submit_answer</code>)를 만들어 모델이 끝났음을 신호로 보내게 한다.
+  </div>
 </section>
 
 <section class="section" id="s3">
@@ -187,6 +222,59 @@
     </div>
   </div>
 
+  <div class="subhead">워크플로우 단계 라벨</div>
+  <p>입력 감싸기와 별개로, 단계 사이에 <em>"어떤 종류의 텍스트인지"</em>를 라벨링하는 태그군. evaluator-optimizer / orchestrator / ReAct 같은 패턴에서 사실상 표준 어휘로 굳어짐.</p>
+
+  <div class="code-card">
+    <div class="code-head">
+      <h4>evaluator-optimizer에서 발췌</h4>
+      <span class="tag">python</span>
+    </div>
+    <pre><code class="language-python"># 평가 단계
+prompt=f"&lt;task&gt;{task}&lt;/task&gt;\n&lt;draft&gt;{draft}&lt;/draft&gt;"
+
+# 개정 단계
+prompt=f"&lt;draft&gt;{draft}&lt;/draft&gt;\n&lt;critique&gt;{critique}&lt;/critique&gt;"</code></pre>
+  </div>
+
+  <div class="decision cols-3">
+    <div class="row">
+      <div class="cell head">태그</div>
+      <div class="cell head">의미</div>
+      <div class="cell head">자주 보이는 패턴</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;task&gt;</code></div>
+      <div class="cell">원래 작업·목표</div>
+      <div class="cell">evaluator-optimizer, agent</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;draft&gt;</code> / <code>&lt;output&gt;</code></div>
+      <div class="cell">모델 생성 초안·결과</div>
+      <div class="cell">chaining, evaluator-optimizer</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;critique&gt;</code> / <code>&lt;feedback&gt;</code></div>
+      <div class="cell">평가·리뷰 결과</div>
+      <div class="cell">evaluator-optimizer</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;plan&gt;</code> / <code>&lt;step id="1"&gt;</code></div>
+      <div class="cell">분해된 계획·단계</div>
+      <div class="cell">orchestrator, chaining</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;reasoning&gt;</code> / <code>&lt;scratchpad&gt;</code></div>
+      <div class="cell">추론 과정</div>
+      <div class="cell">CoT, ReAct</div>
+    </div>
+    <div class="row">
+      <div class="cell"><code>&lt;observation&gt;</code> / <code>&lt;action&gt;</code></div>
+      <div class="cell">도구·환경 관찰과 행동</div>
+      <div class="cell">ReAct, agent loop</div>
+    </div>
+  </div>
+
   <ul>
     <li><strong>주의 — <code>&lt;thinking&gt;</code></strong>: 시키지 않아도 Claude가 사고 과정을 이 태그에 자발적으로 넣는 경향. 다른 용도로 쓰지 말 것.</li>
     <li><strong>일관성</strong> — 한 프롬프트 안에서 같은 의미는 같은 태그.</li>
@@ -202,7 +290,7 @@
 <footer>
   <div class="lockup">training-agents / docs</div>
   <div>
-    소스: <code>src/prompt_chain.py</code>, <code>src/augmented_llm.py</code> &nbsp;·&nbsp;
+    소스: <code>src/patterns/basic/</code> &nbsp;·&nbsp;
     참고: <a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic — Building Effective Agents</a>
   </div>
 </footer>
